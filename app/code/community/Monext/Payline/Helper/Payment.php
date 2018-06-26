@@ -65,7 +65,7 @@ class Monext_Payline_Helper_Payment extends Mage_Core_Helper_Abstract
         if ($buyerFirstName == null || $buyerFirstName == '') {
             $buyerFirstName = substr($billingAddress->getFirstname(), 0, 50);
         }
-        
+
         $buyerPrefix = $customer->getPrefix();
         if($buyerPrefix == 'Mme'){
           $array['buyer']['title'] = '1';
@@ -75,7 +75,7 @@ class Monext_Payline_Helper_Payment extends Mage_Core_Helper_Abstract
           $array['buyer']['title'] = '4';
         } else {
           $array['buyer']['title'] = '4';
-        }              
+        }
         $array['buyer']['lastName'] = Mage::helper('payline')->encodeString($buyerLastName);
         $array['buyer']['firstName'] = Mage::helper('payline')->encodeString($buyerFirstName);
         $email = $customer->getEmail();
@@ -155,10 +155,10 @@ class Monext_Payline_Helper_Payment extends Mage_Core_Helper_Abstract
         $array['billingAddress']['state'] = Mage::helper('payline')->encodeString($billingAddress->getRegion());
         $billingPhone = str_replace($forbidenPhoneCars, '', $billingAddress->getTelephone());
         if (preg_match($regexpPhone, $billingPhone)) {
-            $array['billingAddress']['phone'] = $billingPhone;            
+            $array['billingAddress']['phone'] = $billingPhone;
         }
         if($billingPhone){
-          $array['buyer']['mobilePhone'] = $billingPhone;        
+          $array['buyer']['mobilePhone'] = $billingPhone;
         }else{
           $array['buyer']['mobilePhone'] = $shippingPhone;
         }
@@ -436,7 +436,7 @@ class Monext_Payline_Helper_Payment extends Mage_Core_Helper_Abstract
     public function updateOrder($order, $res, $transactionId, $paymentType = 'CPT')
     {
         // First, log message which says that we are updating the order
-        Mage::helper('payline/logger')->log("[updateOrder] Mise à jour commande " . $order->getIncrementId() . " (mode $paymentType) avec la transaction $transactionId");
+        Mage::helper('payline/logger')->log("[updateOrder] " . $order->getIncrementId() . " (mode $paymentType) with transaction $transactionId");
 
         // By default this process isn't OK
         $orderOk = false;
@@ -461,6 +461,7 @@ class Monext_Payline_Helper_Payment extends Mage_Core_Helper_Abstract
 
                 // This process is not OK
                 $orderOk = true;
+                $orderErrorMsg = '';
 
                 // N time payment?
                 if ($paymentType == 'NX') {
@@ -471,7 +472,8 @@ class Monext_Payline_Helper_Payment extends Mage_Core_Helper_Abstract
                             Mage::helper('payline/logger')->log("[updateOrder] première échéance paiement NX OK");
                             $orderOk = true;
                         } else {
-                            Mage::helper('payline/logger')->log("[updateOrder] première échéance paiement NX refusée, code " . $code_echeance);
+                            $orderErrorMsg = "[updateOrder] première échéance paiement NX refusée, code " . $code_echeance;
+                            Mage::helper('payline/logger')->log($orderErrorMsg);
                             $orderOk = false;
                         }
                     } else {
@@ -494,13 +496,25 @@ class Monext_Payline_Helper_Payment extends Mage_Core_Helper_Abstract
                 $orderTotal = round($order->getBaseGrandTotal() * 100);
                 $orderRef = $order->getRealOrderId();
                 $orderCurrency = Mage::helper('payline')->getNumericCurrencyCode($order->getBaseCurrencyCode());
+
                 if($orderTotal != $res['payment']['amount']){
-                    Mage::helper('payline/logger')->log("ERROR for order $orderRef - paid amount (".$res['payment']['amount'].") does not match order amount ($orderTotal)");
+                    $orderErrorMsg = "[updateOrder] ERROR for order $orderRef - paid amount (".$res['payment']['amount'].") does not match order amount ($orderTotal)";
+                    Mage::helper('payline/logger')->log($orderErrorMsg);
                     $orderOk = false;
                 }
                 if($orderCurrency != $res['payment']['currency']){
-                    Mage::helper('payline/logger')->log("ERROR for order $orderRef - payment currency (".$res['payment']['currency'].") does not match order amount ($orderCurrency)");
+                    $orderErrorMsg = "[updateOrder] ERROR for order $orderRef - payment currency (".$res['payment']['currency'].") does not match order amount ($orderCurrency)";
+                    Mage::helper('payline/logger')->log($orderErrorMsg);
                     $orderOk = false;
+                }
+
+
+                if(!$orderOk) {
+                    if(!$orderErrorMsg) {
+                        $orderErrorMsg = "Unknown error in updateOrder for transaction: " . $transactionId;
+                    }
+
+                    Mage::helper('payline')->initPayline('CPT')->doReset(array('transactionID' => $transactionId, 'comment' => $orderErrorMsg));
                 }
                 
                 // Save the order
