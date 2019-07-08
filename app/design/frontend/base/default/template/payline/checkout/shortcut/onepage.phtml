@@ -1,0 +1,97 @@
+<?php /* @var $this Monext_Payline_Block_Checkout_Onepage */?>
+
+<div class="overlay" id="shortcut-please-wait" style="display: none">
+    <img src="<?php echo $this->getSkinUrl('images/opc-ajax-loader.gif') ?>" alt="<?php echo $this->__('Loading...') ?>" title="<?php echo $this->__('Loading...') ?>" class="v-middle" />
+</div>
+
+<script type="text/javascript">
+//<![CDATA[
+var Review = Class.create();
+Review.prototype = {
+    initialize: function(){
+
+    },
+
+    save: function(){
+        if ('undefined' != typeof widgetShortcutWrapper) {
+            widgetShortcutWrapper.shortcutPlaceOrder()
+        }
+    },
+};
+
+showStateAddressPaymentFunction = function(state) {
+    var redirectDefaultUrl = encodeURI('<?php echo $this->getUrl('checkout/cart') ?>');
+
+    if ("PAYMENT_METHODS_LIST_SHORTCUT" == state.state) {
+        // specific process if needed
+    }
+
+    if ("PAYMENT_TRANSITIONAL_SHORTCUT" == state.state) {
+
+        var $shortcutPayBtnContainer = $('pl-tShortcut-pay-btn-container');
+        var paySectionTitle = '<?php echo $this->__('Pay with shortcut'); ?>';
+        if($shortcutPayBtnContainer) {
+            $('pl-tShortcut-pay-btn-container').hide();
+            var $shortcutPayBtn = $('pl-tShortcut-pay-btn-container').select('button').first();
+            if($shortcutPayBtn) {
+                $('payline-pay-section-title').update($shortcutPayBtn.innerHTML);
+            }
+        }
+
+        $('payline-shipping-method-load').show();
+        $('payline-review-load').show();
+
+        widgetShortcutWrapper.shortcutSaveAddresses();
+    }
+
+    if ("PAYMENT_SUCCESS" == state.state) {
+        if(widgetShortcutWrapper.successUrl) {
+            redirectDefaultUrl = encodeURI(widgetShortcutWrapper.successUrl);
+        }
+
+        location.href = encodeURI(redirectDefaultUrl);
+    }
+
+    if ("TOKEN_EXPIRED" == state.state) {
+        location.href = encodeURI(redirectDefaultUrl);
+    }
+
+};
+
+//]]>
+</script>
+
+<div class="page-title">
+    <h2 id="payline-pay-section-title"><?php echo $this->__('Pay with shortcut'); ?></h2>
+    <div id="payline-checkout-shortcut-load">
+        <!-- Content insert with javascript -->
+    </div>
+</div>
+
+<div class="page-title">
+    <h2><?php echo $this->__("Set shipping method"); ?></h2>
+    <div id="payline-shipping-method-load" class="paylineContainer shipping-method" style="display: none"
+    <!-- Content loaded dynamically -->
+    <?php echo $this->getChildHtml('payline-shortcut.shipping-method'); ?>
+    </div>
+</div>
+
+<div class="page-title">
+    <h2><?php echo $this->__('Your order'); ?></h2>
+    <div id="payline-review-load" class="paylineContainer order-review" style="display: none">
+        <!-- Content loaded dynamically -->
+        <?php echo $this->getChildHtml('payline-shortcut.review-info'); ?>
+    </div>
+</div>
+
+<script type="text/javascript">
+//<![CDATA[
+
+var widgetShortcutWrapper = new PaylineWidgetShortcutWrapper('<?php echo Mage::helper('payline/widget')->getDataTokenForShortcut() ?>',
+    '<?php echo $this->getUrl('payline/shortcut/saveAddresses', array('form_key' => Mage::getSingleton('core/session')->getFormKey())) ?>',
+    '<?php echo $this->getUrl('payline/shortcut/saveShippingMethod', array('form_key' => Mage::getSingleton('core/session')->getFormKey())) ?>',
+    '<?php echo $this->getUrl('payline/shortcut/saveOrder', array('form_key' => Mage::getSingleton('core/session')->getFormKey())) ?>'
+);
+
+//]]>
+</script>
