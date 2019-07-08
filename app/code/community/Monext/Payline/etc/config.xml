@@ -2,7 +2,7 @@
 <config>
     <modules>
         <Monext_Payline>
-            <version>1.8.5.6</version>
+            <version>1.8.6.2</version>
         </Monext_Payline>
     </modules>
     <global>
@@ -284,6 +284,7 @@
                 <init_order_status>pending</init_order_status>
                 <fraud_order_status>pending</fraud_order_status>
                 <automate_wallet_subscription>1</automate_wallet_subscription>
+                <increment_stock_on_failed_dwp>1</increment_stock_on_failed_dwp>
             </payline_common>
             <PaylineCPT>
                 <model>payline/cpt</model>
@@ -291,6 +292,7 @@
                 <!-- Auth+Capture, 100 is capture only -->
                 <payline_payment_action>101</payline_payment_action>
                 <send_wallet_id>1</send_wallet_id>
+                <display_review>0</display_review>
             </PaylineCPT>
             <PaylineNX>
                 <model>payline/nx</model>
@@ -317,5 +319,12 @@
                 <payline_payment_action>101</payline_payment_action>
             </PaylineWALLET>
         </payment>
+        <payline>
+            <PaylineSHORTCUT>
+                <default_address_value>
+                    <!-- Default required attribute address value -->
+                </default_address_value>
+            </PaylineSHORTCUT>
+        </payline>
     </default>
 </config>
