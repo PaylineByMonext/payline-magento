@@ -21,6 +21,11 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
      */
     protected $order;
 
+    public function getCurrentOrder()
+    {
+        return $this->order;
+    }
+
     protected function _getCustomerSession()
     {
         return Mage::getSingleton('customer/session');
@@ -210,11 +215,14 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
                             ->setToken($result['token'])
                             ->setDateCreate(time());
             $token->save();
-
-            header("location:" . $result['redirectURL']);
-            exit();
+//return;
+            //header("location:" . $result['redirectURL']);
+            $this->_redirectUrl($result['redirectURL']);
+            return;
         } else { // Payline error
-            Mage::helper('payline/payment')->updateStock($this->order);
+            if (Mage::getStoreConfig('payment/payline_common/increment_stock_on_failed_dwp')) {
+                Mage::helper('payline/payment')->updateStock($this->order);
+            }
             $msg = Mage::helper('payline')->__('Error during payment');
             Mage::getSingleton('core/session')->addError($msg);
             if (isset($result) && is_array($result)) {
@@ -385,11 +393,13 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
                 $redirectUrl = Mage::getBaseUrl() . "checkout/onepage/success/";
                 Mage_Core_Controller_Varien_Action::_redirectSuccess($redirectUrl);
             } else {
-                Mage::helper('payline/logger')->log('['.$fromAction.'] ' . $this->order->getIncrementId() . $msgLog);
+                Mage::helper('payline/logger')->log('[validateAcsAction] ' . $this->order->getIncrementId() . ' refused');
                 $this->_redirectUrl($this->_getPaymentRefusedRedirectUrl());
-                return;
+                return $this;
             }
         }
+
+        return $this;
     }
 
     /**
@@ -446,7 +456,9 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
         	$paylineSDK->setPrivate($privateData);
         }
 
-        if(!isset($_POST['PaRes']) && in_array(Mage::getStoreConfig('payment/PaylineWALLET/wallet_payment_security'), array(Monext_Payline_Helper_Data::WALLET_3DS,Monext_Payline_Helper_Data::WALLET_BOTH))){
+        $postData = $this->getRequest()->getPost();
+        
+        if(!isset($postData['PaRes']) && in_array(Mage::getStoreConfig('payment/PaylineWALLET/wallet_payment_security'), array(Monext_Payline_Helper_Data::WALLET_3DS,Monext_Payline_Helper_Data::WALLET_BOTH))){
         	// customer has to be redirected on ACC for 3DS password filling
         	$verifyEnrollmentRequest = array();
         	$verifyEnrollmentRequest['version'] 					= $array['version'];
@@ -471,13 +483,14 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
         		return;
         	}
         	if($verifyEnrollmentResponse['result']['code'] == '03000'){
-        		echo "<form method='POST' id='acsform' action='".$verifyEnrollmentResponse['actionUrl']."'>";
-        		echo "	<input type='hidden' name='".$verifyEnrollmentResponse['pareqFieldName']."' value='".$verifyEnrollmentResponse['pareqFieldValue']."'>";
-        		echo "	<input type='hidden' name='".$verifyEnrollmentResponse['mdFieldName']."' value='".$verifyEnrollmentResponse['mdFieldValue']."'>";
-        		echo "	<input type='hidden' name='".$verifyEnrollmentResponse['termUrlName']."' value='".Mage::getUrl('payline/index/wallet')."'>";
-        		echo "</form>";
-        		echo "<script type='text/javascript'>document.getElementById('acsform').submit();</script>";
-        		return;
+        		$output = "<form method='POST' id='acsform' action='".$verifyEnrollmentResponse['actionUrl']."'>";
+        		$output .= "	<input type='hidden' name='".$verifyEnrollmentResponse['pareqFieldName']."' value='".$verifyEnrollmentResponse['pareqFieldValue']."'>";
+        		$output .= "	<input type='hidden' name='".$verifyEnrollmentResponse['mdFieldName']."' value='".$verifyEnrollmentResponse['mdFieldValue']."'>";
+        		$output .= "	<input type='hidden' name='".$verifyEnrollmentResponse['termUrlName']."' value='".Mage::getUrl('payline/index/wallet')."'>";
+        		$output .= "</form>";
+        		$output .= "<script type='text/javascript'>document.getElementById('acsform').submit();</script>";
+        		$this->getResponse()->setBody($output);
+                        return;
         	}else{
         		Mage::helper('payline/payment')->updateStock($this->order);
         		$msgLog='PAYLINE ERROR during verifyEnrollment: '.$verifyEnrollmentResponse['result']['code']. ' ' . $verifyEnrollmentResponse['result']['shortMessage'] . ' ('.$verifyEnrollmentResponse['result']['longMessage'].')';
@@ -491,9 +504,9 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
         	}
         }
 
-        if(isset($_POST['PaRes'])){ // back from ACS
-        	$array['3DSecure']['md'] = $_POST['MD'];
-			$array['3DSecure']['pares'] = $_POST['PaRes'];
+        if(isset($postData['PaRes'])){ // back from ACS
+        	$array['3DSecure']['md'] = $postData['MD'];
+			$array['3DSecure']['pares'] = $postData['PaRes'];
         }
 
         try{
@@ -535,7 +548,7 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
 
         }else {
             Mage::helper('payline/payment')->updateStock($this->order);
-            $msgLog='PAYLINE ERROR during doImmediateWalletPayment: '.$author_result['result']['code']. ' ' . $author_result['result']['shortMessage'] . ' ('.$author_result['result']['longMessage'].')';
+            $msgLog='PAYLINE ERROR during doImmediateWalletPayment: '.$doImmediateWalletPaymentResponse['result']['code']. ' ' . $doImmediateWalletPaymentResponse['result']['shortMessage'] . ' ('.$author_result['result']['longMessage'].')';
 
             $this->order->setState(Mage_Sales_Model_Order::STATE_CANCELED,$failedOrderStatus,$msgLog,false);
             $this->order->save();
@@ -637,7 +650,7 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
             $this->order->setState(Mage_Sales_Model_Order::STATE_NEW, $initStatus, '', false);
             $this->order->save();
             header("location:" . $result['redirectURL']);
-            exit();
+            return;
         } else {
             Mage::helper('payline/payment')->updateStock($this->order);
             if (isset($result) && is_array($result)) {
@@ -661,8 +674,12 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
     {
         $result = array();
 
-        $method = $this->getRequest()->getParam('paymentmethod');
+        $data = $this->getRequest()->getParam('payment', array());
+        if(empty($data) or !is_array($data)) {
+            $data = array();
+        }
 
+        $method = $this->getRequest()->getParam('paymentmethod');
         try {
             if(empty($method)) {
                 throw new Exception('No payment method');
@@ -670,7 +687,7 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
             $onePage = Mage::getSingleton('checkout/type_onepage');
             $quote = $onePage->getQuote();
             if($quote and $quote->getId()) {
-                $data=array('method'=>$method);
+                $data['method'] = $method;
                 $quote->getPayment()->importData($data);
             } else {
                 // Incorrect order_id
@@ -687,10 +704,15 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
             $this->getResponse()->setBody(Mage::helper('core')->jsonEncode($result));
         } else {
             $this->getRequest()->setParam('form_key', Mage::getSingleton('core/session')->getFormKey());
+            $this->getRequest()->setPost('payment', $data);
             $this->_forward('saveOrder', 'onepage', 'checkout');
         }
     }
 
+    public function cptWidgetShortcutAction()
+    {
+        $this->_forward('cptReturnWidget',NULL,NULL, array('paylineshortcut'=>1));
+    }
 
 
     public function cptReturnWidgetAction()
@@ -705,8 +727,7 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
                 throw new Exception('No token');
             }
 
-            $tokenModel = Mage::getModel('payline/token')->getCollection()->addFieldToFilter('token',$paylineToken);
-            $tokenData = $tokenModel->getFirstItem()->getData();
+            $tokenData = Mage::getModel('payline/token')->load($paylineToken, 'token')->getData();
 
             // Order is loaded from id associated to the token
             if(sizeof($tokenData) == 0){
@@ -718,175 +739,205 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
                 throw new Exception('Cannot find valid contract number');
             }
 
-            $order = Mage::getModel('sales/order')->loadByIncrementId($tokenData['order_id']);
+            $orderIncrementId = $tokenData['order_id'];
+
+            $order = Mage::getModel('sales/order')->loadByIncrementId($orderIncrementId);
+            $onePage = Mage::getSingleton('checkout/type_onepage');
+            $quote = $onePage->getQuote();
+
             if(!$order->getId()) {
-                $onePage = Mage::getSingleton('checkout/type_onepage');
-                $quote = $onePage->getQuote();
-                if($quote and $quote->getId() && $quote->getReservedOrderId()==$tokenData['order_id']) {
+                if($quote and $quote->getId() and $quote->getReservedOrderId()==$orderIncrementId) {
+
                     $data=array('method'=>'PaylineCPT', 'cc_type'=>$contractNumber);
                     $quote->getPayment()->importData($data);
-
                     $onePage->saveOrder();
                     $onePage->getQuote()->save();
 
-                    $parameters = array('paylinetoken'=>$paylineToken);
-                    $this->_forward('cptReturn',NULL,NULL,$parameters);
-                    return $this;
+                    Mage::helper('payline/logger')->log('[cptReturnWidgetAction] order ' . $orderIncrementId . ' created for quoteId:' . $quote->getId());
                 } else {
                     // Incorrect order_id
-                    throw new Exception('Incorrect quote_id or reserved_order_id '.$paylineToken);
+                    throw new Exception('Quote getReservedOrderId (' . $quote->getReservedOrderId() .') do not match tokenData (' . $orderIncrementId .') for quoteId:' . $quote->getId());
                 }
-            } else {
-                // Order should not be created
-                throw new Exception('Order already exist for '.$tokenData['order_id']);
+            } elseif(!$this->getRequest()->getParam('paylineshortcut')) {
+                // Order should not be created exept from shortcut
+                throw new Exception('Order already exist for '.$orderIncrementId);
             }
-
         } catch (Exception $e) {
             //TODO: If payment is done it should be canceled
-            Mage::helper('payline/logger')->log('[cptReturnWidgetAction] '.$e->getMessage());
+            Mage::helper('payline/logger')->log('[cptReturnWidgetAction]  ('.$paylineToken.') : Exception:  '.$e->getMessage());
+            $errorMsg = $this->__('There was an error processing your order. Please contact us or try again later.');
+            $clickMsg = $this->__('Click here if you are not redirected within 10 seconds...');
+            Mage::getSingleton('core/session')->addError($errorMsg);
+            $url = Mage::getUrl('checkout/cart');
+            //We use a JS Redirect to prevent big response page for Payline, but keep a beautiful one for customer
+            $this->getResponse()->setHttpResponseCode(200)
+                ->setBody('<html>
+                        <head>
+                            <script type="text/javascript">window.location.replace("' . $url . '");</script>
+                        </head>
+                        <body>
+                            <noscript>
+                                <h1>' . $errorMsg . '</h1>
+                                <a href="' . $url . '">' . $clickMsg . '</a>
+                            </noscript>
+                        </body>
+                    </html>'
+                );
+            return $this;
         }
 
-        Mage::getSingleton('core/session')->addError($this->__('There was an error processing your order. Please contact us or try again later.'));
-        $this->_redirect('checkout/cart');
+        $this->_forward('cptReturn',NULL,NULL, array('paylinetoken'=>$paylineToken));
         return $this;
     }
-
-
-
 
     /**
      * Action called on the customer's return/cancel form the Payline payment page OR when Payline notifies the shop
      */
-    public function cptReturnAction(){
+    public function cptReturnAction()
+    {
+        $paylineToken = $this->getRequest()->getParam('paylinetoken');
+        if (empty($paylineToken)) {
+            $paylineToken = $this->getRequest()->getParam('token');
+        }
 
-      $paylineToken = $this->getRequest()->getParam('paylinetoken');
-      if(empty($paylineToken)) {
-          $paylineToken = $this->getRequest()->getParam('token');
-      }
+        $tokenData = Mage::getModel('payline/token')->load($paylineToken, 'token')->getData();
 
-    	$tokenModel = Mage::getModel('payline/token')->getCollection()->addFieldToFilter('token',$paylineToken);
-    	$tokenData = $tokenModel->getFirstItem()->getData();
+        $queryData = $this->getRequest()->getQuery();
+        // Order is loaded from id associated to the token
+        if (sizeof($tokenData) == 0) {
+            Mage::helper('payline/logger')->log('[cptReturnAction] - token ' . $queryData['token'] . ' is unknown');
+            return;
+        }
+        $this->order = Mage::getModel('sales/order')->loadByIncrementId($tokenData['order_id']);
 
-    	// Order is loaded from id associated to the token
-    	if(sizeof($tokenData) == 0){
-    		Mage::helper('payline/logger')->log('[cptReturnAction] - token '.$_GET['token'].' is unknown');
-    		return;
-    	}
-    	$this->order = Mage::getModel('sales/order')->loadByIncrementId($tokenData['order_id']);
+        if (!in_array($tokenData['status'], array(0, 3)) && !isset($queryData['force_upd'])) { // order update is already done => exit this function
+            if (isset($queryData['notificationType'])) return; // call from notify URL => no page to display
 
-    	if(!in_array($tokenData['status'],array(0,3)) && !isset($_GET['force_upd'])){ // order update is already done => exit this function
-    		if(isset($_GET['notificationType'])) return; // call from notify URL => no page to display
+            $acceptedCodes = array(
+                '00000', // Credit card -> Transaction approved
+                '02500', // Wallet -> Operation successfull
+                '02501', // Wallet -> Operation Successfull with warning / Operation Successfull but wallet will expire
+                '04003', // Fraud detected - BUT Transaction approved (04002 is Fraud with payment refused)
+                '00100',
+                '03000',
+                '34230', // signature SDD
+                '34330' // prélèvement SDD
+            );
 
-    		$acceptedCodes = array(
-    			'00000', // Credit card -> Transaction approved
-    		    '02500', // Wallet -> Operation successfull
-    		    '02501', // Wallet -> Operation Successfull with warning / Operation Successfull but wallet will expire
-    		    '04003', // Fraud detected - BUT Transaction approved (04002 is Fraud with payment refused)
-    		    '00100',
-    		    '03000',
-    		    '34230', // signature SDD
-    		    '34330' // prélèvement SDD
-    		);
+            if (in_array($tokenData['result_code'], $acceptedCodes)) {
+                $this->_redirect('checkout/onepage/success');
+            } else {
+                Mage::getSingleton('checkout/session')->addError(Mage::helper('payline')->__('Your payment is refused'));
+                $this->_redirectUrl($this->_getPaymentRefusedRedirectUrl());
+            }
+            return;
+        }
 
-    		if(in_array($tokenData['result_code'], $acceptedCodes)){
-            	$this->_redirect('checkout/onepage/success');
-        	}else{
-            	Mage::getSingleton('core/session')->addError(Mage::helper('payline')->__('Your payment is refused'));
-            	$this->_redirectUrl($this->_getPaymentRefusedRedirectUrl());
-        	}
-        	return;
-    	}
-
-    	  $tokenForUpdate = Mage::getModel('payline/token')->load($tokenData['id']);
+        $tokenForUpdate = Mage::getModel('payline/token')->load($tokenData['id']);
         $webPaymentDetails = Mage::helper('payline')->initPayline('CPT')->getWebPaymentDetails(array('token' => $paylineToken, 'version' => Monext_Payline_Helper_Data::VERSION));
-        if(isset($webPaymentDetails)){
-        	if(is_array($webPaymentDetails)){
-        		if(Mage::helper('payline/payment')->updateOrder($this->order, $webPaymentDetails,$webPaymentDetails['transaction']['id'], 'CPT')){ // payment OK
-        			$redirectUrl = Mage::getBaseUrl()."checkout/onepage/success/";
 
-        			// set order status
-        			if($webPaymentDetails['result']['code'] == '04003') {
-        				$newOrderStatus = Mage::getStoreConfig('payment/payline_common/fraud_order_status');
-        				Mage::helper('payline')->setOrderStatus($this->order, $newOrderStatus);
-        			} else {
-        				Mage::helper('payline')->setOrderStatusAccordingToPaymentMode(
-        				$this->order, $webPaymentDetails['payment']['action'] );
-        			}
+        $this->order->getPayment()->setAdditionalInformation('payline_payment_info', $webPaymentDetails['payment']);
 
-        			// update token model to flag this order as already updated and save resultCode & transactionId
-        			$tokenForUpdate->setStatus(1); // OK
-        			$tokenForUpdate->setTransactionId($webPaymentDetails['transaction']['id']);
-        			$tokenForUpdate->setResultCode($webPaymentDetails['result']['code']);
+        if (isset($webPaymentDetails)) {
+            if (is_array($webPaymentDetails) and !empty($webPaymentDetails['transaction'])) {
+                if (!empty($webPaymentDetails['transaction']['id']) && Mage::helper('payline/payment')->updateOrder($this->order, $webPaymentDetails, $webPaymentDetails['transaction']['id'], 'CPT')) {
+                    $redirectUrl = Mage::getUrl('checkout/onepage/success');
 
-        			// save wallet if created during this payment
-        			if(!empty($webPaymentDetails['privateDataList']) and !empty($webPaymentDetails['privateDataList']['privateData'])) {
-            			foreach ($webPaymentDetails['privateDataList']['privateData'] as $privateDataList){
-            				if($privateDataList->key == 'newWalletId'){
-            					if(isset($webPaymentDetails['wallet']) && $webPaymentDetails['wallet']['walletId'] == $privateDataList->value){ // Customer may have unchecked the "Save this information for my next orders" checkbox on payment page. If so, wallet is not created !
-            						$this->saveWallet($privateDataList->value);
-            					}
-            				}
-            			}
-        			}
+                    // set order status
+                    if ($webPaymentDetails['result']['code'] == '04003') {
+                        $newOrderStatus = Mage::getStoreConfig('payment/payline_common/fraud_order_status');
+                        Mage::helper('payline')->setOrderStatus($this->order, $newOrderStatus);
+                    } else {
+                        Mage::helper('payline')->setOrderStatusAccordingToPaymentMode(
+                            $this->order, $webPaymentDetails['payment']['action']);
+                    }
 
-        			// create invoice if needed
-        			Mage::helper('payline')->automateCreateInvoiceAtShopReturn('CPT', $this->order);
+                    // update token model to flag this order as already updated and save resultCode & transactionId
+                    $tokenForUpdate->setStatus(1); // OK
+                    $tokenForUpdate->setTransactionId($webPaymentDetails['transaction']['id']);
+                    $tokenForUpdate->setResultCode($webPaymentDetails['result']['code']);
 
-        		}else{ // payment NOT OK
-        			$msgLog='PAYMENT KO : '.$webPaymentDetails['result']['code']. ' ' . $webPaymentDetails['result']['shortMessage'] . ' ('.$webPaymentDetails['result']['longMessage'].')';
-        			$tokenForUpdate->setResultCode($webPaymentDetails['result']['code']);
+                    // save wallet if created during this payment
+                    if(!empty($webPaymentDetails['wallet']) and !empty($webPaymentDetails['wallet']['walletId'])) {
+                        $this->saveWallet($webPaymentDetails['wallet']['walletId']);
+                    } elseif(!empty($webPaymentDetails['privateDataList']) and !empty($webPaymentDetails['privateDataList']['privateData'])) {
+                        $privateDataList = $webPaymentDetails['privateDataList']['privateData'];
+                        if (!empty($privateDataList['key']) and !empty($privateDataList['value']) and $privateDataList['key'] == 'newWalletId') {
+                            $this->saveWallet($privateDataList['value']);
+                        } else {
+                            foreach ($webPaymentDetails['privateDataList']['privateData'] as $privateDataList){
+                                if(is_object($privateDataList) && $privateDataList->key == 'newWalletId'){
+                                    if(isset($webPaymentDetails['wallet']) && $webPaymentDetails['wallet']['walletId'] == $privateDataList->value){ // Customer may have unchecked the "Save this information for my next orders" checkbox on payment page. If so, wallet is not created !
+                                        $this->saveWallet($privateDataList->value);
+                                    }
+                                }
+                            }
+                        }
+                    }
 
-        			$pendingCodes = array(
-        				'02306', // Customer has to fill his payment data
-        			    '02533', // Customer not redirected to payment page AND session is active
-        			    '02000', // transaction in progress
-        			    '02005', // transaction in progress
-        			    '02015', // transaction delegated to partner
-        			    '02016', // Transaction pending by the partner
-        			    '02017', // Transaction pending
-        			    paylineSDK::ERR_CODE // communication issue between Payline and the store
-        			);
+                    // create invoice if needed
+                    Mage::helper('payline')->automateCreateInvoiceAtShopReturn('CPT', $this->order);
 
-        			if(!in_array($webPaymentDetails['result']['code'], $pendingCodes)){
-        			    if ($webPaymentDetails['result']['code'] == '00000') { // payment is OK, but a mismatch with order was detected
-        			        $paymentDataMismatchStatus = Mage::getStoreConfig('payment/payline_common/payment_mismatch_order_status');
-        			        $this->order->setState(Mage_Sales_Model_Order::STATE_CANCELED,$paymentDataMismatchStatus,$msgLog,false);
-        			    }elseif ($webPaymentDetails['result']['code'] == '02304' || $webPaymentDetails['result']['code'] == '02324' || $webPaymentDetails['result']['code'] == '02534') {
-        					$abandonedStatus = Mage::getStoreConfig('payment/payline_common/resignation_order_status');
-        					$this->order->setState(Mage_Sales_Model_Order::STATE_CANCELED,$abandonedStatus,$msgLog,false);
-        				}elseif ($webPaymentDetails['result']['code'] == '02319') {
-        					Mage::getSingleton('core/session')->addError(Mage::helper('payline')->__('Your payment is canceled'));
-        					$canceledStatus = Mage::getStoreConfig('payment/payline_common/canceled_order_status');
-        					$this->order->setState(Mage_Sales_Model_Order::STATE_CANCELED,$canceledStatus,$msgLog,false);
-        				}else {
-        					Mage::getSingleton('core/session')->addError(Mage::helper('payline')->__('Your payment is refused'));
-        					$failedOrderStatus = Mage::getStoreConfig('payment/payline_common/failed_order_status');
-        					$this->order->setState(Mage_Sales_Model_Order::STATE_CANCELED,$failedOrderStatus,$msgLog,false);
-        				}
-        				$tokenForUpdate->setStatus(2); // KO
-        				$redirectUrl = $this->_getPaymentRefusedRedirectUrl();
-        			}else{
-        			    Mage::getSingleton('core/session')->addError(Mage::helper('payline')->__('Your payment is saved'));
-        			    $waitOrderStatus = Mage::getStoreConfig('payment/payline_common/wait_order_status');
-        			    $this->order->setState(Mage_Sales_Model_Order::STATE_PROCESSING,$waitOrderStatus,$msgLog,false);
-        			    $tokenForUpdate->setStatus(3); // to be determined
-        			    $redirectUrl = Mage::getBaseUrl()."checkout/onepage/success/";        			    
-        			}
-        			Mage::helper('payline/logger')->log('[cptReturnAction] ' .$this->order->getIncrementId().$msgLog);        			
-        		}
-        		$tokenForUpdate->setDateUpdate(date('Y-m-d G:i:s'));
-        		$tokenForUpdate->save();
+                } else {
+                    // payment NOT OK
+                    $msgLog = 'PAYMENT KO : ' . $webPaymentDetails['result']['code'] . ' ' . $webPaymentDetails['result']['shortMessage'] . ' (' . $webPaymentDetails['result']['longMessage'] . ')';
+                    $tokenForUpdate->setResultCode($webPaymentDetails['result']['code']);
 
-        	}elseif(is_string($webPaymentDetails)){
-        		Mage::helper('payline/logger')->log('[cptReturnAction] order '.$this->order->getIncrementId().' - ERROR - '.$webPaymentDetails);
-        		return;
-        	}
-        }else{
-        	Mage::helper('payline/logger')->log('[cptReturnAction] order '.$this->order->getIncrementId().' : unknown error during update');
-        	return;
+                    $pendingCodes = array(
+                        '02306', // Customer has to fill his payment data
+                        '02533', // Customer not redirected to payment page AND session is active
+                        '02000', // transaction in progress
+                        '02005', // transaction in progress
+                        '02015', // transaction delegated to partner
+                        '02016', // Transaction pending by the partner
+                        '02017', // Transaction pending
+                        paylineSDK::ERR_CODE // communication issue between Payline and the store
+                    );
+
+                    if (!in_array($webPaymentDetails['result']['code'], $pendingCodes)) {
+                        if ($webPaymentDetails['result']['code'] == '00000') { // payment is OK, but a mismatch with order was detected
+                            $paymentDataMismatchStatus = Mage::getStoreConfig('payment/payline_common/payment_mismatch_order_status');
+                            $this->order->setState(Mage_Sales_Model_Order::STATE_CANCELED, $paymentDataMismatchStatus, $msgLog, false);
+                        } elseif (in_array($webPaymentDetails['result']['code'], array('02304', '02324', '02534'))) {
+                            $abandonedStatus = Mage::getStoreConfig('payment/payline_common/resignation_order_status');
+                            $this->order->setState(Mage_Sales_Model_Order::STATE_CANCELED, $abandonedStatus, $msgLog, false);
+                        } elseif ($webPaymentDetails['result']['code'] == '02319') {
+                            Mage::getSingleton('checkout/session')->addError(Mage::helper('payline')->__('Your payment is canceled'));
+                            $canceledStatus = Mage::getStoreConfig('payment/payline_common/canceled_order_status');
+                            $this->order->setState(Mage_Sales_Model_Order::STATE_CANCELED, $canceledStatus, $msgLog, false);
+                        } else {
+                            Mage::getSingleton('checkout/session')->addError(Mage::helper('payline')->__('Your payment is refused'));
+                            $failedOrderStatus = Mage::getStoreConfig('payment/payline_common/failed_order_status');
+                            $this->order->setState(Mage_Sales_Model_Order::STATE_CANCELED, $failedOrderStatus, $msgLog, false);
+                        }
+                        $tokenForUpdate->setStatus(2); // KO
+                        $redirectUrl = $this->_getPaymentRefusedRedirectUrl();
+                    } else {
+                        Mage::getSingleton('checkout/session')->addError(Mage::helper('payline')->__('Your payment is saved'));
+                        $waitOrderStatus = Mage::getStoreConfig('payment/payline_common/wait_order_status');
+                        $this->order->setState(Mage_Sales_Model_Order::STATE_PROCESSING, $waitOrderStatus, $msgLog, false);
+                        $tokenForUpdate->setStatus(3); // to be determined
+                        $redirectUrl =  Mage::getUrl('checkout/onepage/success');
+                    }
+                    Mage::helper('payline/logger')->log('[cptReturnAction] ' . $this->order->getIncrementId() . ' ' . $msgLog);
+                }
+                $tokenForUpdate->setDateUpdate(date('Y-m-d G:i:s'));
+                $tokenForUpdate->save();
+
+            } elseif (is_string($webPaymentDetails)) {
+                $redirectUrl = $this->_getPaymentRefusedRedirectUrl();
+                Mage::helper('payline/logger')->log('[cptReturnAction] order ' . $this->order->getIncrementId() . ' - ERROR - ' . $webPaymentDetails);
+            } else {
+                $redirectUrl = $this->_getPaymentRefusedRedirectUrl();
+            }
+        } else {
+            Mage::helper('payline/logger')->log('[cptReturnAction] order ' . $this->order->getIncrementId() . ' : unknown error during update');
+            return;
         }
         $this->order->save();
-        if(isset($_GET['notificationType'])) return; // call from notify URL => no page to display
+        if (isset($queryData['notificationType']))
+            return; // call from notify URL => no page to display
+
         $this->_redirectUrl($redirectUrl);
     }
 
@@ -902,7 +953,9 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
      * Save NX payment result, called by the bank when the transaction is done
      */
     public function nxNotifAction(){
-        $res = Mage::helper('payline')->initPayline('NX')->getWebPaymentDetails(array('token' => $_GET['token'], 'version' => Monext_Payline_Helper_Data::VERSION));
+        $queryData = $this->getRequest()->getQuery();
+        $res = Mage::helper('payline')->initPayline('NX')->getWebPaymentDetails(array('token' => $queryData['token'], 'version' => Monext_Payline_Helper_Data::VERSION));
+        $this->order->getPayment()->setAdditionalInformation('payline_payment_info', $res['payment']);
         if (isset($res['privateDataList']['privateData']['value'])) {
             $orderRef = $res['privateDataList']['privateData']['value'];
         } else {
@@ -973,7 +1026,7 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
                 }
             }
             Mage::helper('payline/logger')->log('[nxNotifAction] ' . $this->order->getIncrementId() . $msgLog);
-            Mage::getSingleton('core/session')->addError(Mage::helper('payline')->__('Your payment is refused'));
+            Mage::getSingleton('checkout/session')->addError(Mage::helper('payline')->__('Your payment is refused'));
             $redirectUrl = $this->_getPaymentRefusedRedirectUrl();
         }
         $this->order->save();
@@ -986,18 +1039,19 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
      */
     public function nxTermNotifAction()
     {
+        $queryData = $this->getRequest()->getQuery();
         $statusScheduleAlert = Mage::getStoreConfig('payment/PaylineNX/status_when_payline_schedule_alert');
         $statusCCExpired = Mage::getStoreConfig('payment/PaylineNX/status_when_credit_card_schedule_is_expired');
         if (! empty($statusScheduleAlert) || ! empty($statusCCExpired)) {
-            if ($this->isNxTermParamsOk($_GET)) {
+            if ($this->isNxTermParamsOk($queryData)) {
                 /*
                  * BILL = value required for terms notifications
                  * WEBTRS   = value for cash web payment
                  */
-                if ($_GET['notificationType'] == 'BILL') { //
+                if ($queryData['notificationType'] == 'BILL') { //
                     $transactionParams = array();
-                    $transactionParams['transactionId'] = $_GET['transactionId'];
-                    $transactionParams['orderRef'] = $_GET['orderRef'];
+                    $transactionParams['transactionId'] = $queryData['transactionId'];
+                    $transactionParams['orderRef'] = $queryData['orderRef'];
                     $transactionParams['version'] = Monext_Payline_Helper_Data::VERSION;
                     $transactionParams['startDate'] = '';
                     $transactionParams['endDate'] = '';
@@ -1018,12 +1072,12 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
                                 break;
                             case '02501': // payment card will expire
                                 if (! empty($statusScheduleAlert)) {
-                                    $this->order = $this->setOrderStatus($statusScheduleAlert, $_GET['orderRef']);
+                                    $this->order = $this->setOrderStatus($statusScheduleAlert, $queryData['orderRef']);
                                     break;
                                 }
                             default: // if default => error (cc expired or other errors)
                                 if (! empty($statusCCExpired)) {
-                                    $this->order = $this->setOrderStatus($statusCCExpired, $_GET['orderRef']);
+                                    $this->order = $this->setOrderStatus($statusCCExpired, $queryData['orderRef']);
                                 } else {
                                     $mustSave = false;
                                 }
@@ -1092,7 +1146,9 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
      * Cancel a NX payment request /order
      */
     public function nxCancelAction(){
-        $res = Mage::helper('payline')->initPayline('NX')->getWebPaymentDetails(array('token' => $_GET['token'], 'version' => Monext_Payline_Helper_Data::VERSION));
+        $queryData = $this->getRequest()->getQuery();
+        $res = Mage::helper('payline')->initPayline('NX')->getWebPaymentDetails(array('token' => $queryData['token'], 'version' => Monext_Payline_Helper_Data::VERSION));
+        $this->order->getPayment()->setAdditionalInformation('payline_payment_info', $res['payment']);
         if (isset($res['privateDataList']['privateData']['value'])) {
             $orderRef = $res['privateDataList']['privateData']['value'];
         } else {
@@ -1115,12 +1171,12 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
         } elseif (substr($res['result']['code'], 0, 2) == '01' || substr($res['result']['code'], 0, 3) == '021') {
             // Invalid transaction or error during the process on Payline side
             //No error display, the customer is already told on the Payline side
-            Mage::getSingleton('core/session')->addError(Mage::helper('payline')->__('Your payment is refused'));
+            Mage::getSingleton('checkout/session')->addError(Mage::helper('payline')->__('Your payment is refused'));
             $msg = 'PAYLINE ERROR : ' . $res['result']['code'] . ' ' . $res['result']['shortMessage'] . ' (' . $res['result']['longMessage'] . ')';
             Mage::helper('payline/logger')->log('[nxCancelAction] ' . $this->order->getIncrementId() . $msg);
             $cancelStatus = Mage::getStoreConfig('payment/payline_common/failed_order_status');
         } else {
-            Mage::getSingleton('core/session')->addError(Mage::helper('payline')->__('Your payment is canceled'));
+            Mage::getSingleton('checkout/session')->addError(Mage::helper('payline')->__('Your payment is canceled'));
             $msg = 'PAYLINE INFO : ' . $res['result']['code'] . ' ' . $res['result']['shortMessage'] . ' (' . $res['result']['longMessage'] . ')';
             // Transaction cancelled by customer
             $cancelStatus = Mage::getStoreConfig('payment/payline_common/canceled_order_status');
@@ -1171,7 +1227,7 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
         Mage::helper('payline/payment')->updateStock($this->order);
 
         $msg = Mage::helper('payline')->__('Error during payment');
-        Mage::getSingleton('core/session')->addError($msg);
+        Mage::getSingleton('checkout/session')->addError($msg);
 
         $msgLog = $e->getMessage();
         if(empty($msgLog)) {
@@ -1189,7 +1245,7 @@ class Monext_Payline_IndexController extends Mage_Core_Controller_Front_Action
         $tokenCollection = Mage::getModel('payline/token')->getCollection()->addFieldToFilter('status',3); // 3 stands 'pending payment result' status
         foreach($tokenCollection as $token) {
             $this->getRequest()->setParam('token', $token->getToken());
-            $_GET['notificationType'] = 'WAITUPD'; // force notificationType param to prevent cptReturnAction to display customer result page
+            $this->getRequest()->setQuery('notificationType', 'WAITUPD'); // force notificationType param to prevent cptReturnAction to display customer result page
             $this->cptReturnAction();
         }
     }

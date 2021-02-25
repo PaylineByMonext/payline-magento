@@ -6,6 +6,11 @@
 class Monext_Payline_Adminhtml_Payline_ManagecontractsController extends Mage_Adminhtml_Controller_Action
 {
 
+    protected function _isAllowed()
+    {
+        return Mage::getSingleton('admin/session')->isAllowed('payline/contract');
+    }
+
     public function indexAction()
     {
         $this->_title($this->__('Manage Payline Contracts'));
@@ -62,8 +67,13 @@ class Monext_Payline_Adminhtml_Payline_ManagecontractsController extends Mage_Ad
             $listPointOfSell = $result['listPointOfSell']['pointOfSell'];
             foreach ($listPointOfSell as $key => $pointOfSell) {
                 if (is_object($pointOfSell)) {
-                    $contracts        = $pointOfSell->contracts->contract;
-                    $pointOfSellLabel = $pointOfSell->label;
+                    try {
+                        $contracts        = $pointOfSell->contracts->contract;
+                        $pointOfSellLabel = $pointOfSell->label;
+                    }catch (\Exception $e) {
+                        Mage::helper('payline/logger')->log('[Import contract] ' . $e->getMessage());
+                        Mage::helper('payline/logger')->log('[Import contract] ' . json_encode($pointOfSell));
+                    }
                 } else { //if only one point of sell, we parse an array
                     if ($key == 'contracts') {
                         $contracts = $pointOfSell['contract'];
